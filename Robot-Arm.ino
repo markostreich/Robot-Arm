@@ -1,37 +1,51 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-/* Joystick Pins */
-#define SW_PIN_0 2
-#define X_PIN_0 0
-#define Y_PIN_0 1
-
-#define SW_PIN_1 3
-#define X_PIN_1 2
-#define Y_PIN_1 3
+/*** Joystick Pins ***/
+/* Joystick 0 for rotation and upper arm */
+#define SW_PIN_0 2 // digital pin
+#define X_PIN_0 0 // analog pin
+#define Y_PIN_0 1 // analog pin
+/* Joystick 1 for forearm and hand */
+#define SW_PIN_1 3 // digital pin
+#define X_PIN_1 2 // analog pin
+#define Y_PIN_1 3 // analog pin
 
 /* Servo Values */
 #define SERVOMIN  120
 #define SERVOMAX  610
 
-#define ROOF 0
-
+/**
+   Saves servo position and moves servo to that position.
+*/
 class Servo {
+    /** Driver. */
     Adafruit_PWMServoDriver driver;
+    /** Slot on PWM. */
     uint8_t number;
-    uint16_t servoMaxPosition = SERVOMAX;
-    uint16_t servoMinPosition = SERVOMIN;
+    /** Maximal possible position of servo arm. */
+    const uint16_t servoMaxPosition = SERVOMAX;
+    /** Minimal possible position of servo arm. */
+    const uint16_t servoMinPosition = SERVOMIN;
+    /** Default start position of servo arm. */
     uint16_t servoPosition = (servoMinPosition + servoMaxPosition) / 2;
   public:
+    /**
+       Constructor.
+       @param aDrriver Adafruit_PWMServoDriver - Servo driver.
+       @param aNumber uint8_t - Slot on PWM.
+    */
     Servo(const Adafruit_PWMServoDriver aDriver, const uint8_t aNumber) {
       driver = aDriver;
       number = aNumber;
     }
 
+    /** Delivers current position. */
     uint16_t getPosition() {
       return servoPosition;
     }
 
+    /** Sets new position. */
     void setPosition(const uint16_t aPosition) {
       if (aPosition < servoMinPosition) {
         servoPosition = servoMinPosition;
@@ -41,9 +55,9 @@ class Servo {
         servoPosition = aPosition;
         driver.setPWM(number, 0, servoPosition);
       }
-      //Serial.println(servoPosition);
     }
 
+    /** Moves servo a given step. */
     void move(const int16_t aStep) {
       uint16_t tPosition = servoPosition;
       tPosition += aStep;
@@ -51,37 +65,49 @@ class Servo {
     }
 };
 
+/** Servo driver. */
 Adafruit_PWMServoDriver servoDriver = Adafruit_PWMServoDriver();
 
+/** Joystick borders. Joystick positions between border 3 and 4 do not result in servo motion.
+  The farer the joystick veers away from its middle the faster the servos move. */
 uint16_t yAxisBorders[8] { 895, 770, 635, 542, 482, 355, 250, 125 };
 uint16_t xAxisBorders[8] { 895, 767, 659, 531, 470, 348, 245, 120 };
+
+/* Servos. */
 Servo servo0(servoDriver, 15);
 Servo servo1(servoDriver, 14);
 Servo servo2(servoDriver, 13);
 Servo servo3(servoDriver, 12);
 
+/* Mean servo position. */
 uint16_t servoMeanPosition = (SERVOMAX + SERVOMIN) / 2;
 
 void setup() {
-  // put your setup code here, to run once:
+  Serial.begin(9600);
+  /*
   pinMode(SW_PIN_0, INPUT);
   digitalWrite(SW_PIN_0, HIGH);
-  Serial.begin(9600);
+  */
 
+  /* Init servo driver. */
   servoDriver.begin();
   servoDriver.setPWMFreq(60);
-  servo0.setPosition(servoMeanPosition);
-  servo1.setPosition(servoMeanPosition);
+  /* Init servos with start positions. */
+  servo0.setPosition(servoMeanPosition - 70);
+  servo1.setPosition(servoMeanPosition + 200);
   servo2.setPosition(servoMeanPosition);
-  servo3.setPosition(servoMeanPosition);
+  servo3.setPosition(servoMeanPosition - 180);
   delay(100);
 }
 
 void loop() {
-  const int8_t rotate = moveOrder(yAxisBorders, Y_PIN_0);
-  const int8_t upperArm = moveOrder(xAxisBorders, X_PIN_0);
-  const int8_t foreArm = moveOrder(xAxisBorders, X_PIN_1);
-  const int8_t hand = moveOrder(yAxisBorders, Y_PIN_1);
+  /* Receive joystick commands. */
+  const int8_t rotate = moveCommand(yAxisBorders, Y_PIN_0);
+  const int8_t upperArm = moveCommand(xAxisBorders, X_PIN_0);
+  const int8_t foreArm = moveCommand(xAxisBorders, X_PIN_1);
+  const int8_t hand = moveCommand(yAxisBorders, Y_PIN_1);
+
+  /* Move servos if command received. */
   if (rotate != 0 || upperArm != 0 || foreArm != 0 || hand != 0) {
     if (rotate != 0) {
       const int8_t dirRotate = rotate < 0 ? -2 : 2;
@@ -99,22 +125,31 @@ void loop() {
       const int8_t dirHand = hand < 0 ? 2 : -2;
       servo3.move(dirHand);
     }
+    /* Slowest server dictates the speed. */
     uint8_t absUpperArm = abs(upperArm);
     uint8_t absRotate = abs(rotate);
     uint8_t absForeArm = abs(foreArm);
     uint8_t absHand = abs(hand);
     delay(max(absUpperArm, max(absRotate, max(absForeArm, absHand))));
-    //delay(absUpperArm > absRotate ? absUpperArm : absRotate);
   } else {
     delay(100);
   }
-
+  /*
+    Serial.print("rotate: ");
+    Serial.println(servo0.getPosition());
+    Serial.print("upperArm: ");
+    Serial.println(servo1.getPosition());
+    Serial.print("foreArm: ");
+    Serial.println(servo2.getPosition());
+    Serial.print("hand: ");
+    Serial.println(servo3.getPosition());
+  */
 }
 
 /*
- * 
- */
-int8_t moveOrder(const uint16_t axisBorders[8], const uint8_t pin) {
+
+*/
+int8_t moveCommand(const uint16_t axisBorders[8], const uint8_t pin) {
   uint16_t axisValue = analogRead(pin);
   if (axisValue >= axisBorders[0])
     return 1;
